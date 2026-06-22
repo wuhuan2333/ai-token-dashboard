@@ -69,6 +69,20 @@ function TrendChart({ rows, dates, sources, compareRows, compareDates, mode, onM
     ? compareDates.map(d => compareByDate.get(d) || 0)
     : null;
 
+  const topSourceByDate = useMemo(() => {
+    const top = new Map();
+    for (const d of dates) {
+      for (let i = sources.length - 1; i >= 0; i -= 1) {
+        const src = sources[i];
+        if ((byKey.get(`${d}::${src}`) || 0) > 0) {
+          top.set(d, src);
+          break;
+        }
+      }
+    }
+    return top;
+  }, [byKey, dates, sources]);
+
   // Trend rolling-avg (7-day) for line mode
   const rolling = (() => {
     const arr = [];
@@ -84,6 +98,19 @@ function TrendChart({ rows, dates, sources, compareRows, compareDates, mode, onM
   // Build the series based on mode
   const series = [];
   const palette = sources.map(s => U.getSourceColor(s));
+  const stableBarState = {
+    emphasis: { focus: 'none', itemStyle: { opacity: 1 } },
+    blur: { itemStyle: { opacity: 1 } },
+    select: { itemStyle: { opacity: 1 } }
+  };
+  const stableLineState = (width = 2, areaOpacity = null) => {
+    const area = areaOpacity == null ? {} : { areaStyle: { opacity: areaOpacity } };
+    return {
+      emphasis: { focus: 'none', lineStyle: { width, opacity: 1 }, itemStyle: { opacity: 1 }, ...area },
+      blur: { lineStyle: { opacity: 1 }, itemStyle: { opacity: 1 }, ...area },
+      select: { lineStyle: { opacity: 1 }, itemStyle: { opacity: 1 }, ...area }
+    };
+  };
 
   if (mode === 'stacked' || mode === 'bar') {
     sources.forEach((src, i) => {
@@ -92,12 +119,18 @@ function TrendChart({ rows, dates, sources, compareRows, compareDates, mode, onM
         type: 'bar',
         stack: mode === 'stacked' ? 'total' : undefined,
         barMaxWidth: 24,
-        itemStyle: {
-          color: palette[i],
-          borderRadius: mode === 'stacked' && i === sources.length - 1 ? [4, 4, 0, 0] : (mode === 'bar' ? [3, 3, 0, 0] : 0)
-        },
-        emphasis: { focus: 'series' },
-        data: dates.map(d => byKey.get(`${d}::${src}`) || 0)
+        itemStyle: { color: palette[i] },
+        ...stableBarState,
+        data: dates.map(d => {
+          const value = byKey.get(`${d}::${src}`) || 0;
+          if (mode === 'bar') return { value, itemStyle: { borderRadius: [3, 3, 0, 0] } };
+          return {
+            value,
+            itemStyle: {
+              borderRadius: value > 0 && topSourceByDate.get(d) === src ? [4, 4, 0, 0] : 0
+            }
+          };
+        })
       });
     });
   } else if (mode === 'line') {
@@ -121,7 +154,7 @@ function TrendChart({ rows, dates, sources, compareRows, compareDates, mode, onM
             ]
           }
         },
-        emphasis: { focus: 'series', lineStyle: { width: 3 } },
+        ...stableLineState(2.6, 0.08),
         data: dates.map(d => byKey.get(`${d}::${src}`) || 0)
       });
     });
@@ -136,6 +169,7 @@ function TrendChart({ rows, dates, sources, compareRows, compareDates, mode, onM
       symbol: 'none',
       lineStyle: { width: 1.6, color: 'oklch(0.55 0.005 80)', type: 'dashed' },
       itemStyle: { color: 'oklch(0.55 0.005 80)' },
+      ...stableLineState(1.6),
       data: dates.map((_, i) => compareSeries[i] || 0),
       z: 5
     });
@@ -149,6 +183,8 @@ function TrendChart({ rows, dates, sources, compareRows, compareDates, mode, onM
       smooth: 0.5,
       symbol: 'none',
       lineStyle: { width: 1.6, color: 'oklch(0.45 0.04 265)', type: [4, 4] },
+      itemStyle: { color: 'oklch(0.45 0.04 265)' },
+      ...stableLineState(1.6),
       data: rolling,
       z: 4
     });
@@ -160,7 +196,10 @@ function TrendChart({ rows, dates, sources, compareRows, compareDates, mode, onM
     animationDuration: 400,
     tooltip: {
       trigger: 'axis',
-      axisPointer: { type: 'shadow', shadowStyle: { color: 'oklch(0.95 0.004 80 / 0.6)' } },
+      axisPointer: {
+        type: 'line',
+        lineStyle: { color: 'oklch(0.62 0.04 265 / 0.45)', width: 1, type: [3, 3] }
+      },
       backgroundColor: '#ffffff',
       borderColor: 'oklch(0.92 0.004 80)',
       borderWidth: 1,
@@ -273,52 +312,89 @@ function SourceDonut({ rows, sources, total, onFocusSource, focused }) {
     backgroundColor: 'transparent',
     tooltip: {
       trigger: 'item',
+      appendToBody: true,
+      confine: true,
+      transitionDuration: 0,
       backgroundColor: '#fff',
       borderColor: 'oklch(0.92 0.004 80)',
       borderWidth: 1,
       textStyle: { color: 'oklch(0.18 0.005 80)', fontSize: 12 },
+      extraCssText: 'pointer-events:none;box-shadow:0 8px 24px rgb(0 0 0 / 0.08);border-radius:8px;',
       formatter: p => `<div style="font-weight:600;margin-bottom:4px">${p.name}</div>
         <div style="font-size:14px;font-weight:600">${U.compactCN(p.value)} tokens</div>
         <div style="font-size:11px;color:oklch(0.55 0.005 80)">${(p.percent || 0).toFixed(1)}%</div>`
     },
     series: [{
       type: 'pie',
-      radius: ['62%', '92%'],
+      animationDurationUpdate: 220,
+      animationEasingUpdate: 'cubicOut',
+      stateAnimation: {
+        duration: 140,
+        easing: 'cubicOut'
+      },
+      radius: ['48%', '78%'],
       center: ['50%', '50%'],
+      minAngle: 2,
       avoidLabelOverlap: true,
       label: { show: false },
       labelLine: { show: false },
       itemStyle: {
+        borderRadius: 8,
         borderColor: '#fff',
-        borderWidth: 3
+        borderWidth: 2,
+        shadowBlur: 12,
+        shadowOffsetY: 3,
+        shadowColor: 'rgba(15, 23, 42, 0.16)'
       },
-      emphasis: { scaleSize: 4, itemStyle: { shadowBlur: 10, shadowColor: 'oklch(0 0 0 / 0.06)' } },
+      emphasis: {
+        scale: true,
+        scaleSize: 3,
+        itemStyle: {
+          shadowBlur: 12,
+          shadowOffsetY: 3,
+          shadowColor: 'rgba(15, 23, 42, 0.16)'
+        }
+      },
+      blur: {
+        itemStyle: { opacity: 1 }
+      },
       data: data.map(d => ({
         name: d.name,
         value: d.value,
-        itemStyle: { color: d.color, opacity: focused && focused !== d.name ? 0.25 : 1 }
+        itemStyle: { color: d.color, opacity: focused && focused !== d.name ? 0.25 : 1 },
+        emphasis: {
+          itemStyle: {
+            color: d.color,
+            opacity: 1,
+            borderColor: '#fff',
+            borderWidth: 2,
+            shadowBlur: 12,
+            shadowOffsetY: 3,
+            shadowColor: 'rgba(15, 23, 42, 0.16)'
+          }
+        }
       }))
     }]
   };
 
   return (
-    <div className="panel">
-      <div className="panel-header">
+    <div className="panel source-donut-panel">
+      <div className="panel-header source-donut-header">
         <div>
           <h2 className="panel-title">来源占比</h2>
-          <p className="panel-sub">点击图例聚焦 · 顶部 1 项贡献 {data[0] && sum ? ((data[0].value / sum) * 100).toFixed(0) : 0}%</p>
         </div>
+        <p className="panel-sub source-donut-note">点击图例聚焦 · 顶部 1 项贡献 {data[0] && sum ? ((data[0].value / sum) * 100).toFixed(0) : 0}%</p>
       </div>
-      <div className="donut-row">
-        <div style={{position: 'relative', width: 200, height: 200, flexShrink: 0}}>
-          <EChart option={option} height={200}/>
+      <div className="donut-stack">
+        <div className="donut-stage">
+          <EChart option={option} height={236}/>
           <div style={{
             position: 'absolute', inset: 0, display: 'grid', placeItems: 'center',
             pointerEvents: 'none', textAlign: 'center'
           }}>
             <div>
               <div style={{fontSize: 10.5, color: 'var(--muted)', letterSpacing: '0.08em', textTransform: 'uppercase'}}>合计</div>
-              <div style={{fontSize: 19, fontWeight: 600, fontVariantNumeric: 'tabular-nums', marginTop: 2}}>
+              <div style={{fontSize: 22, fontWeight: 600, fontVariantNumeric: 'tabular-nums', marginTop: 2}}>
                 {U.compactCN(sum)}
               </div>
             </div>
@@ -330,7 +406,7 @@ function SourceDonut({ rows, sources, total, onFocusSource, focused }) {
               className={`legend-item ${focused && focused !== d.name ? 'dim' : ''}`}
               onClick={() => onFocusSource(focused === d.name ? null : d.name)}>
               <span className="legend-swatch" style={{background: d.color}}/>
-              <span className="legend-name">{d.name}</span>
+              <span className="legend-name" title={d.name}>{d.name}</span>
               <span className="legend-val">{U.compactCN(d.value)}</span>
               <span className="legend-pct">{sum ? ((d.value / sum) * 100).toFixed(1) : 0}%</span>
             </div>
